@@ -129,10 +129,18 @@ class ElasticsearchEngine extends Engine
             'index' => $this->index,
             'type' => $builder->model->searchableAs(),
             'body' => [
+                'track_scores' => true,
                 'query' => [
                     'bool' => [
-                        'must' => [['query_string' => [ 'query' => "*{$builder->query}*"]]]
+                        'must' => [['query_string' => [
+                            'query' => "*{$builder->query}*",
+                            'fields' => $this->priority($builder->model->searchableAs()),
+                        ]]]
                     ]
+                ],
+                'sort' => [
+                  //  'post_date' => [ "order" => "desc" ],
+                    '_score' => [ 'order' => 'desc' ],
                 ]
             ]
         ];
@@ -151,6 +159,14 @@ class ElasticsearchEngine extends Engine
         }
 
         return $this->elastic->search($params);
+    }
+
+    protected function priority($type)
+    {
+        switch ($type){
+            case 'posts_index' :
+                return [ "title^100", "message"];
+        }
     }
 
     /**
