@@ -132,10 +132,11 @@ class ElasticsearchEngine extends Engine
                 'track_scores' => true,
                 'query' => [
                     'bool' => [
-                        'must' => [['query_string' => [
-                            'query' => "*{$builder->query}*",
-                            'fields' => $this->priority($builder->model->searchableAs()),
-                        ]]]
+                        'must' => [
+                            'query_string' => [
+                                'query' => "*{$builder->query}*"
+                            ]
+                        ]
                     ]
                 ],
                 'sort' => [
@@ -144,6 +145,16 @@ class ElasticsearchEngine extends Engine
                 ]
             ]
         ];
+
+        if ($this->priority($builder->model->searchableAs()))
+        {
+            $params['body']['query']['bool']['must']['query_string']['fields'] = $this->priority($builder->model->searchableAs());
+        }
+
+        if ($this->filterDate($builder->model->searchableAs()))
+        {
+            $params['body']['query']['bool']['must_not'] = $this->filterDate($builder->model->searchableAs());
+        }
 
         if (isset($options['from'])) {
             $params['body']['from'] = $options['from'];
@@ -161,12 +172,42 @@ class ElasticsearchEngine extends Engine
         return $this->elastic->search($params);
     }
 
+    /**
+     * @param $type
+     * @return array
+     */
+    protected function filterDate($type)
+    {
+        switch ($type){
+            case 'posts_index' :
+                return [
+                    'range' => [
+                        'up_time' => [
+                            'lt' => time() - 86400*30*6
+                        ]
+                    ]
+                ];
+
+            default:
+                return false;
+        }
+        return false;
+    }
+
+    /**
+     * @param $type
+     * @return array
+     */
     protected function priority($type)
     {
         switch ($type){
             case 'posts_index' :
                 return [ "title^100", "message"];
+
+            default:
+                return false;
         }
+        return false;
     }
 
     /**
