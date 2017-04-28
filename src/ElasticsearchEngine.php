@@ -125,30 +125,33 @@ class ElasticsearchEngine extends Engine
      */
     protected function performSearch(Builder $builder, array $options = [])
     {
+        $extraSearch = '';
+        if (isset($options['numericFilters']) && count($options['numericFilters'])) {
+            $extraSearch = $options['numericFilters'];
+        }
+
         $params = [
             'index' => $this->index,
             'type' => $builder->model->searchableAs(),
             'body' => [
-                'track_scores' => true,
+				'track_scores' => true,
                 'query' => [
                     'bool' => [
                         'must' => [
                             'query_string' => [
-                                'query' => "*{$builder->query}*"
+                                'query' => "+*{$builder->query}*$extraSearch"
                             ]
-                        ]
+                        ],
                     ]
-                ],
-                'sort' => [
-                  //  'post_date' => [ "order" => "desc" ],
-                    '_score' => [ 'order' => 'desc' ],
                 ]
             ]
         ];
+        // 'query' => "*{$builder->query}* +(category_id:(17 OR 56)) +(location_id:(1))"
 
         if ($this->priority($builder->model->searchableAs()))
         {
             $params['body']['query']['bool']['must']['query_string']['fields'] = $this->priority($builder->model->searchableAs());
+            $params['body']['query']['bool']['must']['query_string']['use_dis_max'] = true;
         }
 
         if ($this->filterDate($builder->model->searchableAs()))
@@ -156,17 +159,14 @@ class ElasticsearchEngine extends Engine
             $params['body']['query']['bool']['must_not'] = $this->filterDate($builder->model->searchableAs());
         }
 
+        if ($sort = $this->sort($builder)) {
+            $params['body']['sort'] = $sort;
+        }
         if (isset($options['from'])) {
             $params['body']['from'] = $options['from'];
         }
-
         if (isset($options['size'])) {
             $params['body']['size'] = $options['size'];
-        }
-
-        if (isset($options['numericFilters']) && count($options['numericFilters'])) {
-            $params['body']['query']['bool']['must'] = array_merge($params['body']['query']['bool']['must'],
-                $options['numericFilters']);
         }
 
         return $this->elastic->search($params);
@@ -211,6 +211,23 @@ class ElasticsearchEngine extends Engine
     }
 
     /**
+     * Generates the sort if theres any.
+     *
+     * @param  Builder $builder
+     * @return array|null
+     */
+    protected function sort($builder)
+    {
+        if (count($builder->orders) == 0) {
+            return null;
+        }
+        return collect($builder->orders)->map(function($order) {
+            return [$order['column'] => $order['direction']];
+        })->toArray();
+    }
+
+
+    /**
      * Get the filter array for the query.
      *
      * @param  Builder  $builder
@@ -218,9 +235,13 @@ class ElasticsearchEngine extends Engine
      */
     protected function filters(Builder $builder)
     {
-        return collect($builder->wheres)->map(function ($value, $key) {
-            return ['match_phrase' => [$key => $value]];
-        })->values()->all();
+        $extraSearch = '';
+        foreach ($builder->wheres AS $key => $value)
+        {
+            $extraSearch .= " +($key:($value))";
+        }
+
+        return $extraSearch;
     }
 
     /**
