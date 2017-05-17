@@ -238,9 +238,22 @@ class ElasticsearchEngine extends Engine
         $extraSearch = '';
         foreach ($builder->wheres AS $key => $value)
         {
-            $extraSearch .= " +($key:($value))";
+            if (is_array($value))
+            {
+                $extraSearch .= " +(";
+                $condition = '';
+                foreach ($value AS $k => $v)
+                {
+                    $condition .= "($key:($v)) OR ";
+                }
+                $condition = substr($condition, 0, -4);
+                $extraSearch .= $condition . ")";
+            }
+            else
+            {
+                $extraSearch .= " +($key:($value))";
+            }
         }
-
         return $extraSearch;
     }
 
