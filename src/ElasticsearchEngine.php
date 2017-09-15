@@ -91,7 +91,8 @@ class ElasticsearchEngine extends Engine
     {
         return $this->performSearch($builder, array_filter([
             'numericFilters' => $this->filters($builder),
-            'size' => $builder->limit,
+            'ranger' => $this->filtersRanger($builder),
+            'size' => $builder->limit
         ]));
     }
 
@@ -107,6 +108,7 @@ class ElasticsearchEngine extends Engine
     {
         $result = $this->performSearch($builder, [
             'numericFilters' => $this->filters($builder),
+            'ranger' => $this->filtersRanger($builder),
             'from' => (($page * $perPage) - $perPage),
             'size' => $perPage,
         ]);
@@ -129,7 +131,6 @@ class ElasticsearchEngine extends Engine
         if (isset($options['numericFilters']) && count($options['numericFilters'])) {
             $extraSearch = $options['numericFilters'];
         }
-
         $params = [
             'index' => $this->index,
             'type' => $builder->model->searchableAs(),
@@ -141,11 +142,12 @@ class ElasticsearchEngine extends Engine
                             'query_string' => [
                                 'query' => "+*{$builder->query}*$extraSearch"
                             ]
-                        ],
+                        ]
                     ]
                 ]
             ]
         ];
+
         // 'query' => "*{$builder->query}* +(category_id:(17 OR 56)) +(location_id:(1))"
 
         if ($this->priority($builder->model->searchableAs()))
@@ -154,9 +156,9 @@ class ElasticsearchEngine extends Engine
             $params['body']['query']['bool']['must']['query_string']['use_dis_max'] = true;
         }
 
-        if ($this->filterDate($builder->model->searchableAs()))
+        if ($this->filterDate($builder->model->searchableAs(), ['ranger' => $options['ranger']]))
         {
-            $params['body']['query']['bool']['must_not'] = $this->filterDate($builder->model->searchableAs());
+            $params['body']['query']['bool']['filter']['range'] = $this->filterDate($builder->model->searchableAs(), ['ranger' => $options['ranger']]);
         }
 
         if ($sort = $this->sort($builder)) {
@@ -168,7 +170,8 @@ class ElasticsearchEngine extends Engine
         if (isset($options['size'])) {
             $params['body']['size'] = $options['size'];
         }
-
+//        dd($params);
+//
         return $this->elastic->search($params);
     }
 
@@ -176,18 +179,24 @@ class ElasticsearchEngine extends Engine
      * @param $type
      * @return array
      */
-    protected function filterDate($type)
+    protected function filterDate($type, $extra = [])
     {
-        switch ($type){
+        switch ($type)
+        {
             case 'posts_index' :
                 return [
-                    'range' => [
-                        'up_time' => [
-                            'lt' => time() - 86400*30*6
-                        ]
+                    'up_time' => [
+                        'gt' => time() - 86400*30*6
                     ]
                 ];
-
+            case 'storage_item_index' :
+            {
+                if (isset($extra['ranger']) && $extra['ranger'])
+                {
+                    return $extra['ranger'];
+                }
+                return false;
+            }
             default:
                 return false;
         }
@@ -200,10 +209,12 @@ class ElasticsearchEngine extends Engine
      */
     protected function priority($type)
     {
-        switch ($type){
+        switch ($type)
+        {
             case 'posts_index' :
                 return [ "title^100", "message"];
-
+            case 'storage_item_index' :
+                return [ "item_name^100", "item_desc"];
             default:
                 return false;
         }
@@ -238,23 +249,95 @@ class ElasticsearchEngine extends Engine
         $extraSearch = '';
         foreach ($builder->wheres AS $key => $value)
         {
+            $build = true;
             if (is_array($value))
             {
-                $extraSearch .= " +(";
-                $condition = '';
                 foreach ($value AS $k => $v)
                 {
-                    $condition .= "($key:($v)) OR ";
+                    if (in_array($k, ['>', '<', '>=', '<=']) && $k)
+                    {
+                        // ignore operator
+                        $build = false;
+                    }
                 }
-                $condition = substr($condition, 0, -4);
-                $extraSearch .= $condition . ")";
+
+                if ($build)
+                {
+                    $extraSearch .= " +(";
+                    $condition = '';
+                    foreach ($value AS $k => $v)
+                    {
+                        $condition .= "($key:($v)) OR ";
+                    }
+                    $condition = substr($condition, 0, -4);
+                    $extraSearch .= $condition . ")";
+                }
             }
             else
             {
                 $extraSearch .= " +($key:($value))";
             }
+            unset($build);
         }
         return $extraSearch;
+    }
+
+    /**
+     * Get the filter ranger array for the query.
+     *
+     * @param  Builder  $builder
+     * @return array
+     */
+    protected function filtersRanger(Builder $builder)
+    {
+        $extraSearch = [];
+        foreach ($builder->wheres AS $key => $value)
+        {
+            if (is_array($value))
+            {
+                foreach ($value AS $operator => $data)
+                {
+                    if (($operator === '<' || $operator === '>' || $operator === '<=' || $operator === '>=') && $data>0)
+                    {
+                        $extraSearch[$key][$this->_convertOperator($operator)] = $data;
+                        //$extraSearch['create_date']['lt'] = time() - 86400*30*6; // chi hien thi san pham update 6 thang truoc
+                    }
+                }
+            }
+        }
+        return $extraSearch;
+    }
+
+    /**
+     * @param $operator
+     * @return bool|string
+     */
+    protected function _convertOperator($operator)
+    {
+        switch ($operator)
+        {
+//            case '>' :
+//                return 'lte';
+//            case '>=' :
+//                return 'lt';
+//            case '<' :
+//                return 'gte';
+//            case '<=' :
+//                return 'gt';
+
+            case '>' :
+                return 'gt';
+            case '>=' :
+                return 'gte';
+            case '<' :
+                return 'lt';
+            case '<=' :
+                return 'lte';
+
+            default:
+                return false;
+        }
+        return false;
     }
 
     /**
