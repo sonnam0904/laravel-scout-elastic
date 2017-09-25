@@ -371,6 +371,28 @@ class ElasticsearchEngine extends Engine
             $model->getKeyName(), $keys
         )->get()->keyBy($model->getKeyName());
 
+        if (count($keys) > count($models))
+        {
+            // missing item in DB -> delete index
+            foreach ($keys AS $k => $v)
+            {
+                if (!isset($models[$v]))
+                {
+                    $params['body'] = [];
+
+                    $params['body'][] = [
+                        'delete' => [
+                            '_id' => $v,
+                            '_index' => $this->index,
+                            '_type' => $model->searchableAs(),
+                        ]
+                    ];
+
+                    $this->elastic->bulk($params);
+                }
+            }
+        }
+
         return collect($results['hits']['hits'])->map(function ($hit) use ($model, $models) {
             return $models[$hit['_id']];
         });
