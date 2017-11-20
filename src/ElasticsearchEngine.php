@@ -214,7 +214,7 @@ class ElasticsearchEngine extends Engine
             case 'posts_index' :
                 return [ "title^100", "message"];
             case 'storage_item_index' :
-                return [ "item_name^100", "item_desc"];
+                return [ "item_name^100"];
             default:
                 return false;
         }
